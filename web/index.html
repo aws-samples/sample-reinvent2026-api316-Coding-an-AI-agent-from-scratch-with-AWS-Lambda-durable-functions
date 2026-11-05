@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Expo Booth Scout — API316</title>
+  <style>
+    :root {
+      --bg: #0d1117; --panel: #161b22; --border: #30363d;
+      --text: #e6edf3; --muted: #8b949e; --accent: #ff9900; --ok: #3fb950; --bad: #f85149;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg); color: var(--text); line-height: 1.5;
+    }
+    header { padding: 24px 20px; border-bottom: 1px solid var(--border); }
+    header h1 { margin: 0; font-size: 22px; }
+    header p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+    main { max-width: 760px; margin: 0 auto; padding: 24px 20px 64px; }
+    .card {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 10px; padding: 20px; margin-bottom: 20px;
+    }
+    label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+    textarea, input {
+      width: 100%; background: var(--bg); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px; padding: 12px;
+      font-size: 15px; font-family: inherit; resize: vertical;
+    }
+    textarea { min-height: 84px; }
+    .row { display: flex; gap: 12px; }
+    .row > div { flex: 1; }
+    button {
+      background: var(--accent); color: #1a1a1a; border: 0; border-radius: 8px;
+      padding: 12px 20px; font-size: 15px; font-weight: 600; cursor: pointer;
+    }
+    button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
+    button.reject { background: transparent; color: var(--bad); border: 1px solid var(--bad); }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .actions { display: flex; gap: 12px; margin-top: 16px; }
+    .status {
+      display: inline-block; font-size: 12px; padding: 3px 10px; border-radius: 20px;
+      background: #21262d; color: var(--muted); margin-bottom: 12px;
+    }
+    .status.ok { color: var(--ok); } .status.bad { color: var(--bad); }
+    .booth { border-top: 1px solid var(--border); padding: 14px 0; }
+    .booth:first-child { border-top: 0; }
+    .booth h3 { margin: 0 0 4px; font-size: 16px; }
+    .booth .meta { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+    .booth ul { margin: 0; padding-left: 18px; }
+    .booth li { font-size: 14px; }
+    .swap { color: var(--accent); font-size: 12px; }
+    .spinner { color: var(--muted); font-size: 14px; }
+    .hidden { display: none; }
+    .config { margin-top: 20px; font-size: 12px; color: var(--muted); }
+    .config input { font-size: 12px; padding: 6px 8px; }
+    code { background: #21262d; padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🧭 AI Expo Booth Scout</h1>
+    <p>Type what you're building. The agent scouts the re:Invent floor, plans your route, and you approve the plan.</p>
+  </header>
+
+  <main>
+    <!-- Input -->
+    <section class="card" id="inputCard">
+      <label for="description">What are you building / what do you care about?</label>
+      <textarea id="description" placeholder="e.g. I'm building AI agents with serverless and want durable workflows and observability"></textarea>
+      <div class="row" style="margin-top:12px">
+        <div>
+          <label for="name">Your name</label>
+          <input id="name" value="re:Invent Attendee" />
+        </div>
+        <div>
+          <label for="maxBooths">Max booths</label>
+          <input id="maxBooths" type="number" value="5" min="1" max="8" />
+        </div>
+      </div>
+      <div class="actions">
+        <button id="scoutBtn" disabled>Scout the floor →</button>
+        <button class="secondary" id="signInBtn">Sign in</button>
+        <button class="secondary hidden" id="signOutBtn">Sign out</button>
+        <span class="spinner" id="authStatus" style="align-self:center">Not signed in</span>
+      </div>
+      <div class="config">
+        API base: <input id="apiBase" style="width:auto;min-width:280px" placeholder="https://xxxx.execute-api.us-east-1.amazonaws.com" />
+        <span> (ApiBaseUrl stack output)</span>
+      </div>
+      <div class="config">
+        Login domain: <input id="loginDomain" style="width:auto;min-width:280px" placeholder="https://xxxx.auth.us-east-1.amazoncognito.com" />
+        <span> (LoginDomain stack output)</span>
+      </div>
+      <div class="config">
+        Client id: <input id="clientId" style="width:auto;min-width:280px" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxx" />
+        <span> (UserPoolClientId stack output)</span>
+      </div>
+    </section>
+
+    <!-- Progress + hit list -->
+    <section class="card hidden" id="resultCard">
+      <span class="status" id="statusBadge">…</span>
+      <div id="spinner" class="spinner">Scouting the floor…</div>
+      <div id="hitList"></div>
+      <div class="actions hidden" id="approveActions">
+        <button id="approveBtn">👍 Approve this plan</button>
+        <button class="reject" id="rejectBtn">👎 Reject</button>
+      </div>
+    </section>
+
+    <!-- Confirmed guide -->
+    <section class="card hidden" id="guideCard">
+      <span class="status ok">✅ Confirmed guide</span>
+      <div id="guide"></div>
+    </section>
+
+    <!-- Message (reject / failure) -->
+    <section class="card hidden" id="messageCard">
+      <span class="status bad" id="messageBadge">Done</span>
+      <div id="message"></div>
+      <div class="actions"><button class="secondary" id="restartBtn">Start over</button></div>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    // Deployment config (not secret): saved in localStorage so it survives the
+    // sign-in redirect.
+    const configInputs = {
+      apiBase: $("apiBase"), loginDomain: $("loginDomain"), clientId: $("clientId"),
+    };
+    for (const [key, input] of Object.entries(configInputs)) {
+      const storageKey = "scout_" + key;
+      input.value = localStorage.getItem(storageKey) || "";
+      input.addEventListener("change", () => localStorage.setItem(storageKey, input.value.trim()));
+    }
+    const cfg = (key) => configInputs[key].value.trim().replace(/\/$/, "");
+
+    let pollTimer = null;
+    let executionId = null;
+    // A decision has been sent and we are waiting for the function to resume.
+    // Without this the status is still AWAITING_APPROVAL for a second or two after
+    // approving, so render() would re-offer the buttons and stop polling - leaving
+    // the UI stuck and inviting a second click on an already-spent callback.
+    let decisionSent = false;
+
+    // =====================================================================
+    // Sign-in: Cognito managed login, authorization code + PKCE.
+    //
+    // The page is a public client (no secret). It redirects to the Cognito login
+    // page, gets a one-time code back, and exchanges it for tokens together with
+    // the PKCE verifier only this tab knows. The access token goes to the API as
+    // a Bearer token; the API's JWT authorizer verifies it.
+    //
+    // Tokens live in sessionStorage (this tab only, cleared when it closes) and no
+    // refresh token is kept: when the access token expires, sign in again.
+    //
+    // crypto.subtle needs a secure context, and Cognito only redirects back to a
+    // registered URL, so serve this page from http://localhost:8000 (or the
+    // https origin you set as WebOrigin) instead of opening it with file://.
+    // =====================================================================
+    const redirectUri = location.origin + "/";
+    const SESSION_KEY = "scoutSession";
+    const PKCE_KEY = "scoutPkce";
+
+    const b64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)))
+      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const randomString = () => b64url(crypto.getRandomValues(new Uint8Array(32)));
+
+    function loginBase() {
+      const d = cfg("loginDomain");
+      return /^https:\/\//.test(d) ? d : "https://" + d;
+    }
+
+    // Read a JWT's claims. No signature check here: the token came straight from
+    // the Cognito token endpoint over TLS, and the API verifies every token it
+    // receives. This is only used for the nonce check and the display name.
+    function jwtClaims(token) {
+      const part = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+      return JSON.parse(atob(part + "=".repeat((4 - part.length % 4) % 4)));
+    }
+
+    function currentSession() {
+      const s = JSON.parse(sessionStorage.getItem(SESSION_KEY) || "null");
+      if (s && s.expiresAt - Date.now() > 30_000) return s;
+      sessionStorage.removeItem(SESSION_KEY);
+      return null;
+    }
+
+    async function signIn() {
+      if (!crypto?.subtle) {
+        throw new Error("Sign-in needs a secure context. Serve this page from " +
+          "http://localhost:8000 (cd web && python3 -m http.server 8000 --bind 127.0.0.1).");
+      }
+      if (!cfg("loginDomain") || !cfg("clientId")) {
+        throw new Error("Set the Login domain and Client id first (see the fields below the buttons).");
+      }
+      const verifier = randomString();
+      const state = randomString();
+      const nonce = randomString();
+      const challenge = b64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
+      sessionStorage.setItem(PKCE_KEY, JSON.stringify({ verifier, state, nonce }));
+
+      const q = new URLSearchParams({
+        response_type: "code",
+        client_id: cfg("clientId"),
+        redirect_uri: redirectUri,
+        scope: "openid email",
+        state, nonce,
+        code_challenge: challenge,
+        code_challenge_method: "S256",
+      });
+      location.assign(`${loginBase()}/oauth2/authorize?${q}`);
+    }
+
+    // Runs on page load: if Cognito just redirected back with a code, exchange it.
+    async function completeSignIn() {
+      const params = new URLSearchParams(location.search);
+      const code = params.get("code");
+      const error = params.get("error");
+      if (!code && !error) return;
+
+      // Drop the code from the address bar and history; it is single-use anyway.
+      history.replaceState(null, "", location.pathname);
+      const pkce = JSON.parse(sessionStorage.getItem(PKCE_KEY) || "null");
+      sessionStorage.removeItem(PKCE_KEY);
+
+      if (error) throw new Error("Sign-in failed: " + (params.get("error_description") || error));
+      if (!pkce || params.get("state") !== pkce.state) {
+        throw new Error("Sign-in failed: the response did not match this tab's request. Try again.");
+      }
+
+      const r = await fetch(`${loginBase()}/oauth2/token`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          client_id: cfg("clientId"),
+          code,
+          redirect_uri: redirectUri,
+          code_verifier: pkce.verifier,
+        }),
+      });
+      const tokens = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error("Sign-in failed: " + (tokens.error || "HTTP " + r.status));
+
+      const id = jwtClaims(tokens.id_token);
+      if (id.nonce !== pkce.nonce) throw new Error("Sign-in failed: nonce mismatch. Try again.");
+
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify({
+        accessToken: tokens.access_token,
+        email: id.email || "",
+        expiresAt: Date.now() + tokens.expires_in * 1000,
+      }));
+    }
+
+    function signOut() {
+      sessionStorage.removeItem(SESSION_KEY);
+      const q = new URLSearchParams({ client_id: cfg("clientId"), logout_uri: redirectUri });
+      location.assign(`${loginBase()}/logout?${q}`);
+    }
+
+    function updateAuthUi() {
+      const s = currentSession();
+      $("authStatus").textContent = s ? `Signed in${s.email ? " as " + s.email : ""}` : "Not signed in";
+      $("signInBtn").classList.toggle("hidden", !!s);
+      $("signOutBtn").classList.toggle("hidden", !s);
+      $("scoutBtn").disabled = !s;
+    }
+
+    const api = async (path, opts = {}) => {
+      const s = currentSession();
+      if (!s) {
+        updateAuthUi();
+        throw new Error("Your session expired. Sign in again.");
+      }
+      const headers = { authorization: `Bearer ${s.accessToken}` };
+      if (opts.body) headers["content-type"] = "application/json";
+
+      const r = await fetch(cfg("apiBase") + path, {
+        method: opts.method || "GET", headers, body: opts.body || undefined,
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.status === 401) {
+        sessionStorage.removeItem(SESSION_KEY);
+        updateAuthUi();
+        throw new Error("Not signed in, or the session expired. Sign in again.");
+      }
+      if (!r.ok) throw new Error(data.error || data.message || ("HTTP " + r.status));
+      return data;
+    };
+
+    $("signInBtn").addEventListener("click", () => signIn().catch((e) => fail(e.message)));
+    $("signOutBtn").addEventListener("click", signOut);
+    $("scoutBtn").addEventListener("click", start);
+    $("approveBtn").addEventListener("click", () => decide(true));
+    $("rejectBtn").addEventListener("click", () => decide(false));
+    $("restartBtn").addEventListener("click", reset);
+
+    completeSignIn().catch((e) => fail(e.message)).finally(updateAuthUi);
+
+    async function start() {
+      const description = $("description").value.trim();
+      if (!description) { alert("Tell the agent what you're building first."); return; }
+      if (!cfg("apiBase")) { alert("Set the API base URL first (see the field below the buttons)."); return; }
+
+      $("scoutBtn").disabled = true;
+      show("resultCard");
+      $("statusBadge").textContent = "RUNNING";
+      $("spinner").classList.remove("hidden");
+      $("hitList").innerHTML = "";
+      $("approveActions").classList.add("hidden");
+      hide("guideCard"); hide("messageCard");
+
+      try {
+        const res = await api("/scout", {
+          method: "POST",
+          body: JSON.stringify({
+            description,
+            attendee_name: $("name").value.trim() || "Attendee",
+            max_booths: Number($("maxBooths").value) || 5,
+          }),
+        });
+        executionId = res.executionId;
+        poll();
+      } catch (e) {
+        fail(e.message);
+        updateAuthUi(); // re-enables the button only if still signed in
+      }
+    }
+
+    function poll() {
+      clearTimeout(pollTimer);
+      api("/scout/" + executionId)
+        .then(render)
+        .catch((e) => fail(e.message));
+    }
+
+    function render(state) {
+      $("statusBadge").textContent = state.status || "…";
+
+      if (Array.isArray(state.hitList) && state.hitList.length) {
+        $("spinner").classList.add("hidden");
+        renderHitList(state.hitList);
+      }
+
+      switch (state.status) {
+        case "AWAITING_APPROVAL":
+          if (decisionSent) {
+            // Already answered - the function is resuming. Keep waiting rather
+            // than asking again.
+            $("approveActions").classList.add("hidden");
+            $("spinner").classList.remove("hidden");
+            $("spinner").textContent = "Resuming the agent…";
+            pollTimer = setTimeout(poll, 1500);
+          } else {
+            $("spinner").classList.add("hidden");
+            $("approveActions").classList.remove("hidden");
+            // stop polling; wait for the user to decide
+          }
+          break;
+        case "RESERVING":
+          // Approved; the agent is polling the swag service (wait_for_condition).
+          $("approveActions").classList.add("hidden");
+          $("spinner").classList.remove("hidden");
+          $("spinner").innerHTML = "Reserving your swag…<br>" +
+            (state.reservations || []).map((r) =>
+              `${esc(r.booth_number)} · ${esc(r.swag || r.name || "")}: <b>${esc(r.status)}</b>`).join("<br>");
+          pollTimer = setTimeout(poll, 2000);
+          break;
+        case "CONFIRMED":
+          renderGuide(state.confirmedGuide || []);
+          break;
+        case "REJECTED":
+        case "FAILED":
+          $("spinner").classList.add("hidden");
+          fail(state.message || state.status, state.status === "REJECTED");
+          break;
+        default: // RUNNING / HIT_LIST_READY(intermediate)
+          pollTimer = setTimeout(poll, 2000);
+      }
+    }
+
+    function renderHitList(items) {
+      $("hitList").innerHTML =
+        "<span class='status'>🎯 Your hit list</span>" +
+        items.map((it) => `
+          <div class="booth">
+            <h3>${it.order}. ${esc(it.name)} <span class="meta">· Booth ${esc(it.booth_number)}</span></h3>
+            <div class="meta">🎁 Swag: ${esc(it.swag || "surprise swag")}</div>
+            <ul>${(it.talking_points || []).map((t) => `<li>${esc(t)}</li>`).join("")}</ul>
+          </div>`).join("");
+    }
+
+    function renderGuide(items) {
+      $("spinner").classList.add("hidden");
+      $("approveActions").classList.add("hidden");
+      show("guideCard");
+      $("guide").innerHTML = items.map((it) => `
+        <div class="booth">
+          <h3>${it.order}. ${esc(it.name)} <span class="meta">· Booth ${esc(it.booth_number)}</span></h3>
+          <div class="meta">🎁 ${esc(it.swag || "")}</div>
+        </div>`).join("");
+    }
+
+    async function decide(approved) {
+      if (decisionSent) return; // a callback can only be resolved once
+      decisionSent = true;
+      $("approveBtn").disabled = true; $("rejectBtn").disabled = true;
+      $("approveActions").classList.add("hidden");
+      $("spinner").classList.remove("hidden");
+      $("spinner").textContent = approved ? "Resuming the agent…" : "Cancelling…";
+      try {
+        await api("/scout/" + executionId + "/decision", {
+          method: "POST",
+          body: JSON.stringify({ approved }),
+        });
+        pollTimer = setTimeout(poll, 1500);
+      } catch (e) {
+        // "already completed" means the decision landed and the function moved on,
+        // so keep polling instead of showing a failure.
+        if (/already completed|CallbackTimeout/i.test(e.message)) {
+          pollTimer = setTimeout(poll, 1500);
+          return;
+        }
+        // A real failure: let them try again.
+        decisionSent = false;
+        $("approveBtn").disabled = false; $("rejectBtn").disabled = false;
+        $("approveActions").classList.remove("hidden");
+        fail(e.message);
+      }
+    }
+
+    function fail(msg, rejected) {
+      clearTimeout(pollTimer);
+      show("messageCard");
+      const badge = $("messageBadge");
+      badge.textContent = rejected ? "Rejected" : "Note";
+      $("message").textContent = msg;
+    }
+
+    function reset() {
+      clearTimeout(pollTimer);
+      executionId = null;
+      decisionSent = false;
+      $("approveBtn").disabled = false; $("rejectBtn").disabled = false;
+      $("approveActions").classList.add("hidden");
+      updateAuthUi();
+      hide("resultCard"); hide("guideCard"); hide("messageCard");
+      $("spinner").textContent = "Scouting the floor…";
+    }
+
+    const show = (id) => $(id).classList.remove("hidden");
+    const hide = (id) => $(id).classList.add("hidden");
+    const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  </script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+# SAM / build artifacts
+.aws-sam/
+samconfig.toml
+response.json
+# Local editor
+.DS_Store

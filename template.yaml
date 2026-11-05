@@ -1,0 +1,297 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  API316 — AI Expo Booth Scout. A single AWS Lambda durable function that runs
+  one AI agent tool-use loop with a human approval gate, using the Lambda
+  Durable Execution SDK.
+
+Globals:
+  Function:
+    Timeout: 300
+    MemorySize: 512
+    Runtime: python3.14
+
+Parameters:
+  BedrockModelId:
+    Type: String
+    # Newer Claude models are invoked via a cross-region inference profile id
+    # (note the "us." prefix), not a bare model id. Verify what's ACTIVE in your
+    # region with:
+    #   aws bedrock list-foundation-models --by-provider anthropic --by-output-modality TEXT
+    #   aws bedrock list-inference-profiles
+    Default: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+    Description: >
+      Bedrock model id (or inference-profile id) used by the agents. Override
+      per region if this model isn't available.
+  ApprovalTimeoutHours:
+    Type: Number
+    Default: 2
+    Description: How long the attendee-approval callback waits before timing out.
+  WebOrigin:
+    Type: String
+    Default: http://localhost:8000
+    AllowedPattern: "^https?://[^/]+$"
+    ConstraintDescription: Scheme + host (+ port), no path or trailing slash.
+    Description: >
+      Origin the web UI is served from. It is the only origin allowed by CORS,
+      and "<WebOrigin>/" is the only sign-in callback / sign-out URL. Cognito
+      accepts plain http only for localhost; anything else must be https.
+
+Resources:
+  ExpoBoothScoutFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: expo-booth-scout
+      CodeUri: src/
+      Handler: scout.handler.handler
+      Description: Expo Booth Scout — one tool-using AI agent (durable, API316).
+      # Durable functions must be invoked with a qualified ARN (version or
+      # alias), not $LATEST. AutoPublishAlias publishes a new version on every
+      # deploy and points a stable "live" alias at it, so you can always invoke
+      # expo-booth-scout:live.
+      AutoPublishAlias: live
+      # Enable durable execution. The checkpoint/replay engine is applied to
+      # this function; the execution timeout governs the whole run (up to 1yr),
+      # independent of the per-invocation Timeout above.
+      DurableConfig:
+        ExecutionTimeout: 86400        # 24 hours, in seconds
+        RetentionPeriodInDays: 7
+      Environment:
+        Variables:
+          SCOUT_BEDROCK_MODEL_ID: !Ref BedrockModelId
+          SCOUT_APPROVAL_TIMEOUT_HOURS: !Ref ApprovalTimeoutHours
+          SCOUT_TOOL_MAX_ATTEMPTS: "4"
+          SCOUT_STATE_TABLE: !Ref ScoutStateTable
+      Policies:
+        # The durable execution checkpoint permissions are attached automatically
+        # by the service when DurableConfig is set. These are the app permissions.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ScoutStateTable
+        - Statement:
+            - Sid: BedrockInvoke
+              Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource: "*"
+            # Allow the function principal to complete its own approval callbacks
+            # (used when the approval UI/service posts the decision back).
+            - Sid: DurableCallbacks
+              Effect: Allow
+              Action:
+                - lambda:SendDurableExecutionCallbackSuccess
+                - lambda:SendDurableExecutionCallbackFailure
+                - lambda:SendDurableExecutionCallbackHeartbeat
+              Resource: "*"
+
+  # -------------------------------------------------------------------------
+  # State store: one item per execution. The durable function publishes its
+  # progress here; the control API reads it to drive the web UI.
+  # -------------------------------------------------------------------------
+  ScoutStateTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey:
+        Name: executionId
+        Type: String
+      SSESpecification:
+        SSEEnabled: true
+
+  # -------------------------------------------------------------------------
+  # Control API Lambda: start / status / decision, fronted by an HTTP API.
+  # -------------------------------------------------------------------------
+  ScoutApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: expo-booth-scout-api
+      CodeUri: src/
+      Handler: scout.api.handler
+      Description: Control API for the Expo Booth Scout web UI (API316).
+      Environment:
+        Variables:
+          SCOUT_STATE_TABLE: !Ref ScoutStateTable
+          # Durable functions must be invoked with a qualified ARN. The
+          # AutoPublishAlias creates the "live" alias; build its ARN here.
+          SCOUT_FUNCTION_ARN: !Sub "${ExpoBoothScoutFunction.Arn}:live"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ScoutStateTable
+        - Statement:
+            - Sid: InvokeDurableFunction
+              Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource:
+                - !GetAtt ExpoBoothScoutFunction.Arn
+                - !Sub "${ExpoBoothScoutFunction.Arn}:*"
+            - Sid: SendDurableCallbacks
+              Effect: Allow
+              Action:
+                - lambda:SendDurableExecutionCallbackSuccess
+                - lambda:SendDurableExecutionCallbackFailure
+              Resource: "*"
+      Events:
+        StartScout:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ScoutHttpApi
+            Path: /scout
+            Method: POST
+        GetStatus:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ScoutHttpApi
+            Path: /scout/{executionId}
+            Method: GET
+        SendDecision:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ScoutHttpApi
+            Path: /scout/{executionId}/decision
+            Method: POST
+
+  # -------------------------------------------------------------------------
+  # Sign-in. A Cognito user pool authenticates attendees; the web UI signs in
+  # through Cognito managed login (authorization code + PKCE) and sends the
+  # access token as a Bearer token. There is no guest access: self sign-up is
+  # off, so only users the stack owner creates can start (and pay for) a run.
+  # -------------------------------------------------------------------------
+  ScoutUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub "${AWS::StackName}-scout-users"
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true   # no self sign-up
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          TemporaryPasswordValidityDays: 7
+      MfaConfiguration: OPTIONAL
+      EnabledMfas:
+        - SOFTWARE_TOKEN_MFA
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+
+  # Public client for the browser: no secret, code + PKCE only.
+  ScoutUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref ScoutUserPool
+      ClientName: scout-web
+      GenerateSecret: false
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthScopes:
+        - openid
+        - email
+      SupportedIdentityProviders:
+        - COGNITO
+      CallbackURLs:
+        - !Sub "${WebOrigin}/"
+      LogoutURLs:
+        - !Sub "${WebOrigin}/"
+      # SRP backs managed login; ADMIN_USER_PASSWORD_AUTH lets an admin get a
+      # token from the CLI. That flow is an IAM-authorized
+      # admin API (cognito-idp:AdminInitiateAuth), so the public cannot use it.
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_ADMIN_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+      AccessTokenValidity: 60
+      IdTokenValidity: 60
+      RefreshTokenValidity: 1
+      TokenValidityUnits:
+        AccessToken: minutes
+        IdToken: minutes
+        RefreshToken: days
+
+  # Cognito-hosted sign-in pages at
+  # https://<prefix>.auth.<region>.amazoncognito.com. The prefix must be
+  # globally unique, lowercase, and must not contain "aws", "amazon" or "cognito".
+  ScoutUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      UserPoolId: !Ref ScoutUserPool
+      Domain: !Sub "${AWS::StackName}-${AWS::AccountId}"
+      ManagedLoginVersion: 2
+
+  # Managed login (v2) needs a branding style per app client, or the login page
+  # does not render. Cognito's default look is fine here.
+  ScoutManagedLoginBranding:
+    Type: AWS::Cognito::ManagedLoginBranding
+    Properties:
+      UserPoolId: !Ref ScoutUserPool
+      ClientId: !Ref ScoutUserPoolClient
+      UseCognitoProvidedValues: true
+
+  # -------------------------------------------------------------------------
+  # HTTP API. Every route requires a valid access token from the user pool; the
+  # JWT authorizer checks signature, issuer, client id and expiry with no Lambda.
+  # Per-run ownership (only the user who started a run can read or decide it)
+  # is enforced in api.py from the token's "sub" claim.
+  # -------------------------------------------------------------------------
+  ScoutHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Auth:
+        DefaultAuthorizer: CognitoJwt
+        Authorizers:
+          CognitoJwt:
+            IdentitySource: "$request.header.Authorization"
+            JwtConfiguration:
+              issuer: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${ScoutUserPool}"
+              audience:
+                - !Ref ScoutUserPoolClient
+      # Caps blast radius even for an authorized caller.
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 5
+        ThrottlingRateLimit: 2
+      # Only the web UI's origin may call the API from a browser.
+      CorsConfiguration:
+        AllowOrigins:
+          - !Ref WebOrigin
+        AllowHeaders:
+          - content-type
+          - authorization
+        AllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+        MaxAge: 600
+
+Outputs:
+  FunctionName:
+    Description: Name of the Expo Booth Scout durable function.
+    Value: !Ref ExpoBoothScoutFunction
+  FunctionArn:
+    Description: ARN of the Expo Booth Scout durable function.
+    Value: !GetAtt ExpoBoothScoutFunction.Arn
+  ApiBaseUrl:
+    Description: Base URL for the web UI (paste into the frontend's "API base" field).
+    Value: !Sub "https://${ScoutHttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+  StateTableName:
+    Description: DynamoDB table holding per-execution state.
+    Value: !Ref ScoutStateTable
+
+  LoginDomain:
+    Description: Cognito managed login domain (paste into the web UI's "Login domain" field).
+    Value: !Sub "https://${ScoutUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com"
+  UserPoolClientId:
+    Description: App client id for the web UI (paste into the web UI's "Client id" field).
+    Value: !Ref ScoutUserPoolClient
+  UserPoolId:
+    Description: User pool to create attendee accounts in (self sign-up is off).
+    Value: !Ref ScoutUserPool

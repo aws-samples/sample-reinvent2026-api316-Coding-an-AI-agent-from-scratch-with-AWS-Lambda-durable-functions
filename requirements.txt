@@ -1,0 +1,5 @@
+# AWS Lambda Durable Execution SDK (Python)
+aws-durable-execution-sdk-python>=1.0.0
+
+# AWS SDK — used for Bedrock (LLM agents) and Lambda callback APIs
+boto3>=1.35.0

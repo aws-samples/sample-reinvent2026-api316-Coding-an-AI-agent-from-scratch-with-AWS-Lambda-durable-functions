@@ -1,0 +1,113 @@
+{
+  "expo": "AWS re:Invent Expo Hall — The Venetian",
+  "floor_grid": {
+    "description": "Aisles run x=1..12 (west to east), rows run y=1..8 (south to north). Each unit is roughly 30 feet.",
+    "entrance": { "x": 1, "y": 1 }
+  },
+  "booths": [
+    {
+      "booth_number": "A-100",
+      "name": "Serverlesspresso",
+      "tags": ["serverless", "lambda", "durable-functions", "event-driven", "microservices", "eventbridge"],
+      "pitch": "The serverless coffee bar: event-driven workflows across microservices, orchestrated with AWS Lambda durable functions and Amazon EventBridge.",
+      "swag": "Free Serverlesspresso cup",
+      "location": {"x": 1, "y": 3}
+    },
+    {
+      "booth_number": "A-101",
+      "name": "Durable Systems Inc.",
+      "tags": ["serverless", "lambda", "durable-functions", "workflows", "orchestration"],
+      "pitch": "Stateful serverless orchestration with checkpoint-and-replay.",
+      "swag": "Checkpoint socks",
+      "location": { "x": 2, "y": 2 }
+    },
+    {
+      "booth_number": "A-118",
+      "name": "VectorForge",
+      "tags": ["ai", "genai", "vector-database", "rag", "embeddings", "search"],
+      "pitch": "Low-latency vector search for retrieval-augmented generation.",
+      "swag": "Embedding sticker pack",
+      "location": { "x": 4, "y": 2 }
+    },
+    {
+      "booth_number": "B-204",
+      "name": "AgentMesh",
+      "tags": ["ai", "genai", "agents", "multi-agent", "orchestration", "tool-use"],
+      "pitch": "Build, evaluate, and observe multi-agent systems in production.",
+      "swag": "Agent hoodie",
+      "location": { "x": 6, "y": 3 }
+    },
+    {
+      "booth_number": "B-232",
+      "name": "StreamPulse",
+      "tags": ["data", "streaming", "kafka", "kinesis", "real-time", "analytics"],
+      "pitch": "Real-time streaming analytics without managing clusters.",
+      "swag": "Stream water bottle",
+      "location": { "x": 8, "y": 3 }
+    },
+    {
+      "booth_number": "C-307",
+      "name": "SecureEdge",
+      "tags": ["security", "zero-trust", "iam", "compliance", "edge"],
+      "pitch": "Zero-trust access controls for edge and hybrid workloads.",
+      "swag": "Zero-trust webcam cover",
+      "location": { "x": 3, "y": 5 }
+    },
+    {
+      "booth_number": "C-341",
+      "name": "QuantumLeap Databases",
+      "tags": ["data", "database", "distributed-sql", "postgres", "scaling"],
+      "pitch": "Globally distributed SQL with single-digit-millisecond reads.",
+      "swag": "Distributed-SQL t-shirt",
+      "location": { "x": 5, "y": 5 }
+    },
+    {
+      "booth_number": "D-410",
+      "name": "PipelineWorks",
+      "tags": ["devops", "ci-cd", "pipelines", "deployment", "automation"],
+      "pitch": "Progressive delivery and deployment automation for any stack.",
+      "swag": "Pipeline rubber duck",
+      "location": { "x": 9, "y": 5 }
+    },
+    {
+      "booth_number": "D-448",
+      "name": "ObservaCloud",
+      "tags": ["observability", "monitoring", "tracing", "logs", "metrics", "devops"],
+      "pitch": "Unified traces, metrics, and logs with AI-assisted root cause.",
+      "swag": "Tracing sunglasses",
+      "location": { "x": 11, "y": 5 }
+    },
+    {
+      "booth_number": "E-512",
+      "name": "CostGuard",
+      "tags": ["finops", "cost-optimization", "billing", "governance"],
+      "pitch": "Automated cloud cost governance and rightsizing.",
+      "swag": "FinOps piggy bank",
+      "location": { "x": 4, "y": 7 }
+    },
+    {
+      "booth_number": "E-540",
+      "name": "MLForge Platform",
+      "tags": ["ai", "ml", "training", "mlops", "gpu", "fine-tuning"],
+      "pitch": "End-to-end MLOps: train, fine-tune, and serve foundation models.",
+      "swag": "GPU plushie",
+      "location": { "x": 7, "y": 7 }
+    },
+    {
+      "booth_number": "F-601",
+      "name": "EdgeIoT Systems",
+      "tags": ["iot", "edge", "embedded", "real-time", "devices"],
+      "pitch": "Fleet management and OTA updates for millions of edge devices.",
+      "swag": "LED badge kit",
+      "location": { "x": 10, "y": 7 }
+    },
+    {
+      "booth_number": "F-628",
+      "name": "DataMesh Analytics",
+      "tags": ["data", "analytics", "warehouse", "lakehouse", "bi", "sql"],
+      "pitch": "Serverless lakehouse analytics with open table formats.",
+      "swag": "Data-lake tote bag",
+      "location": { "x": 12, "y": 7 }
+    }
+  ]
+}
